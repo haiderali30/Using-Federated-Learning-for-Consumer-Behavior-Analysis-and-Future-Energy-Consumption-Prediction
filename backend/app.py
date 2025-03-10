@@ -1,117 +1,3 @@
-# from flask import Flask, request, jsonify
-# import pandas as pd
-# import numpy as np
-# from tensorflow.keras.layers import TFSMLayer
-# from tensorflow.keras.models import Sequential
-# import joblib
-# from datetime import datetime, timedelta
-# from flask_cors import CORS
-# import logging
-
-# logging.basicConfig(level=logging.DEBUG)
-
-# app = Flask(__name__)
-# CORS(app, resources={r"/predict": {"origins": "*"}})
-
-# # Load the trained model and scaler
-# model_path = "energy_consumption_model"
-# model_layer = TFSMLayer(model_path, call_endpoint="serving_default")
-# model = Sequential([model_layer])
-# scaler = joblib.load("scaler.pkl")
-
-# # Function to calculate future time features
-# def get_future_time_features(hours_ahead):
-#     current_time = datetime.now()
-#     future_time = current_time + timedelta(hours=hours_ahead)
-#     future_features = {
-#         "Hour": future_time.hour,
-#         "DayOfWeek": future_time.weekday(),
-#         "Month": future_time.month,
-#         "IsWeekend": int(future_time.weekday() in [5, 6]),
-#         "IsHoliday": 0,
-#     }
-#     return future_features
-
-# # Function to prepare input data
-# def prepare_input_data(hours_ahead, user_inputs):
-#     try:
-#         future_time_features = get_future_time_features(hours_ahead)
-#         input_data = {**future_time_features, **user_inputs}
-#         input_df = pd.DataFrame([input_data])
-#         features = ["Winter", "Spring", "Summer", "Fall", "Outdoor Temp (°C)", "Humidity (%)", "Cloud Cover (%)",
-#                     "Occupancy", "Special Equipment [kW]", "Lighting [kW]", "HVAC [kW]", "Hour", "DayOfWeek", "Month", "IsWeekend", "IsHoliday"]
-#         input_df = input_df[features]
-#         input_df = scaler.transform(input_df)
-#         return input_df
-#     except Exception as e:
-#         logging.error("Error preparing input data: %s", str(e))
-#         raise
-
-# # Function to make predictions
-# def predict_consumption(model, input_df):
-#     try:
-#         prediction_dict = model.predict(input_df)
-#         prediction_key = list(prediction_dict.keys())[0]
-#         predicted_consumption = prediction_dict[prediction_key][0][0]
-#         return predicted_consumption
-#     except Exception as e:
-#         logging.error("Error during prediction: %s", str(e))
-#         raise
-
-# # Add this function to calculate peak hours
-# def get_peak_hours():
-#     # Placeholder logic for peak hours
-#     # You can replace this with actual logic to determine peak hours based on historical data
-#     peak_hours = {
-#         "Monday": [17, 18, 19],
-#         "Tuesday": [17, 18, 19],
-#         "Wednesday": [17, 18, 19],
-#         "Thursday": [17, 18, 19],
-#         "Friday": [17, 18, 19],
-#         "Saturday": [11, 12, 13],
-#         "Sunday": [11, 12, 13],
-#     }
-#     return peak_hours
-
-# @app.route("/peak_hours", methods=["GET"])
-# def peak_hours():
-#     try:
-#         peak_hours_data = get_peak_hours()
-#         return jsonify(peak_hours_data)
-#     except Exception as e:
-#         app.logger.error(f"Error in /peak_hours endpoint: {e}")
-#         return jsonify({"error": str(e)}), 400
-
-
-# @app.route("/predict", methods=["POST"])
-# def predict():
-#     try:
-#         data = request.json
-#         hours_ahead = data["hours_ahead"]
-#         user_inputs = data["user_inputs"]
-
-#         # Prepare input data
-#         input_df = prepare_input_data(hours_ahead, user_inputs)
-
-#         # Make prediction
-#         predicted_consumption = predict_consumption(model, input_df)
-
-#         # Return prediction
-#         return jsonify({"predicted_consumption": float(predicted_consumption)})
-#     except Exception as e:
-#         app.logger.error(f"Error in /predict endpoint: {e}")
-#         return jsonify({"error": str(e)}), 400
-
-
-# @app.route("/")
-# def home():
-#     return "Energy Consumption Prediction API is running!"
-
-# if __name__ == "__main__":
-#     # Change the port here to avoid conflict
-#     app.run(debug=True, port=5001)  # Change port to 5001 (or any other port)
-
-
 from flask import Flask, request, jsonify
 import numpy as np
 import pandas as pd
@@ -123,7 +9,25 @@ import logging
 
 logging.basicConfig(level=logging.DEBUG)
 app = Flask(__name__)
-CORS(app, resources={r"/predict": {"origins": "*"}})
+
+# Configure CORS to allow all necessary headers and methods
+CORS(app, resources={
+    r"/*": {
+        "origins": ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "Accept"],
+        "supports_credentials": True,
+        "expose_headers": ["Content-Range", "X-Content-Range"]
+    }
+})
+
+# Add CORS headers to all responses
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
 
 # Global constants (adjust as used during training)
 SEQUENCE_LENGTH = 72  # e.g., past 72 hours
@@ -218,6 +122,97 @@ def predict():
 @app.route("/")
 def home():
     return "Energy Consumption Prediction API is running!"
+
+@app.route("/metrics", methods=["GET"])
+def get_metrics():
+    try:
+        building = request.args.get('building')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+
+        app.logger.info(f"Received request for building: {building}, date range: {start_date} to {end_date}")
+
+        if not all([building, start_date, end_date]):
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        # Normalize building name (remove spaces and handle special cases)
+        building_name_map = {
+            "House 1": "House1",
+            "House 2": "House2",
+        }
+        normalized_building = building_name_map.get(building, building.replace(" ", ""))
+        
+        # Read the building-specific dataset
+        file_path = f"datasets/{normalized_building}_data.csv"
+        app.logger.info(f"Reading data from: {file_path}")
+        
+        try:
+            df = pd.read_csv(file_path)
+            app.logger.info(f"Available columns: {df.columns.tolist()}")
+        except Exception as e:
+            app.logger.error(f"Error reading CSV file: {str(e)}")
+            return jsonify({"error": f"Error reading data for building: {building}"}), 500
+
+        # Identify the date/time column (it might be 'timestamp', 'date', or 'Time')
+        time_columns = ['Time', 'timestamp', 'date', 'DateTime']  # Prioritize 'Time' as it's in our data
+        date_column = next((col for col in time_columns if col in df.columns), None)
+        
+        if not date_column:
+            app.logger.error(f"No valid date column found. Available columns: {df.columns.tolist()}")
+            return jsonify({"error": "No valid date/time column found in the dataset"}), 500
+            
+        app.logger.info(f"Using date column: {date_column}")
+
+        # Convert date column and filter by date range
+        df[date_column] = pd.to_datetime(df[date_column])
+        mask = (df[date_column].dt.date >= pd.to_datetime(start_date).date()) & \
+               (df[date_column].dt.date <= pd.to_datetime(end_date).date())
+        df_filtered = df[mask].copy()  # Use copy to avoid SettingWithCopyWarning
+
+        if df_filtered.empty:
+            app.logger.warning(f"No data found for date range: {start_date} to {end_date}")
+            return jsonify({"error": "No data available for the selected date range"}), 404
+
+        # Identify the energy consumption column
+        energy_columns = ['Use [kW]', 'Energy [kW]', 'Consumption [kW]', 'Power [kW]']
+        energy_column = next((col for col in energy_columns if col in df.columns), None)
+        
+        if not energy_column:
+            app.logger.error(f"No valid energy column found. Available columns: {df.columns.tolist()}")
+            return jsonify({"error": "No valid energy consumption column found in the dataset"}), 500
+
+        app.logger.info(f"Using energy column: {energy_column}")
+
+        # Calculate metrics
+        total_consumption = df_filtered[energy_column].sum()
+        peak_demand = df_filtered[energy_column].max()
+        
+        # Find peak hours (hours with highest average consumption)
+        df_filtered.loc[:, 'hour'] = df_filtered[date_column].dt.hour  # Use loc to avoid warning
+        hourly_avg = df_filtered.groupby('hour')[energy_column].mean()
+        peak_hour = hourly_avg.idxmax()
+        peak_hour_str = f"{peak_hour:02d}:00 - {(peak_hour + 1):02d}:00"
+
+        # Calculate average consumption
+        avg_consumption = df_filtered[energy_column].mean()
+
+        # Prepare response
+        response = {
+            "total_consumption": float(total_consumption),
+            "peak_demand": float(peak_demand),
+            "peak_hour": peak_hour_str,
+            "average_consumption": float(avg_consumption)
+        }
+
+        app.logger.info(f"Successfully calculated metrics: {response}")
+        return jsonify(response)
+
+    except FileNotFoundError:
+        app.logger.error(f"File not found: datasets/{normalized_building}_data.csv")
+        return jsonify({"error": f"Data not found for building: {building}"}), 404
+    except Exception as e:
+        app.logger.error(f"Error processing metrics: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

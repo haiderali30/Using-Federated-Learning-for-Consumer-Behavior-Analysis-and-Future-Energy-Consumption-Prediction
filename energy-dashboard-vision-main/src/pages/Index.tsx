@@ -1,98 +1,5 @@
-
-// import { useState } from "react";
-// import { Card } from "@/components/ui/card";
-// import { Building } from "@/types/building";
-// import BuildingSelector from "@/components/BuildingSelector";
-// import DateRangePicker from "@/components/DateRangePicker";
-// import ConsumptionChart from "@/components/ConsumptionChart";
-// import PredictionForm from "@/components/PredictionForm";
-// import { format } from "date-fns";
-// import { DateRange } from "react-day-picker";
-
-// const Index = () => {
-//   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
-//   const [dateRange, setDateRange] = useState<DateRange>({
-//     from: new Date(new Date().setDate(new Date().getDate() - 7)),
-//     to: new Date(),
-//   });
-
-//   return (
-//     <div className="min-h-screen p-6 space-y-6">
-//       <header className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-//         <div>
-//           <h1 className="text-2xl font-bold">
-//             {selectedBuilding 
-//               ? `${selectedBuilding.name} Dashboard`
-//               : "Energy Consumption Dashboard"}
-//           </h1>
-//           <p className="text-muted-foreground">
-//             {selectedBuilding
-//               ? `Monitor and analyze energy usage for ${selectedBuilding.name}`
-//               : "Monitor and analyze energy usage across buildings"}
-//           </p>
-//         </div>
-//         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-//           <BuildingSelector
-//             value={selectedBuilding}
-//             onChange={setSelectedBuilding}
-//           />
-//           <DateRangePicker
-//             value={dateRange}
-//             onChange={(range) => {
-//               if (range) setDateRange(range);
-//             }}
-//           />
-//         </div>
-//       </header>
-
-//       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-//         <Card className="glass-card p-6">
-//           <h3 className="text-lg font-semibold mb-2">Total Consumption</h3>
-//           <div className="text-3xl font-bold text-primary">
-//             {selectedBuilding ? "456.78 kWh" : "2,345.67 kWh"}
-//           </div>
-//           <p className="text-muted-foreground">
-//             {format(dateRange.from || new Date(), "MMM d")} -{" "}
-//             {format(dateRange.to || new Date(), "MMM d")}
-//           </p>
-//         </Card>
-//         <Card className="glass-card p-6">
-//           <h3 className="text-lg font-semibold mb-2">Peak Demand</h3>
-//           <div className="text-3xl font-bold text-destructive">78.9 kW</div>
-//           <p className="text-muted-foreground">Highest in last 24 hours</p>
-//         </Card>
-//         <Card className="glass-card p-6">
-//           <h3 className="text-lg font-semibold mb-2">Peak Hours</h3>
-//           <div className="text-3xl font-bold text-amber-500">
-//             {selectedBuilding ? "2 PM - 4 PM" : "1 PM - 5 PM"}
-//           </div>
-//           <p className="text-muted-foreground">
-//             {selectedBuilding ? "Building peak time" : "Community peak time"}
-//           </p>
-//         </Card>
-//       </div>
-
-//       <div className="grid gap-6 lg:grid-cols-2">
-//         <Card className="glass-card p-6">
-//           <h3 className="text-lg font-semibold mb-4">Consumption Trends</h3>
-//           <ConsumptionChart dateRange={dateRange} buildingId={selectedBuilding?.id} />
-//         </Card>
-//         {!selectedBuilding && (
-//           <Card className="glass-card p-6">
-//             <h3 className="text-lg font-semibold mb-4">Consumption Prediction</h3>
-//             <PredictionForm />
-//           </Card>
-//         )}
-//       </div>
-//     </div>
-//   );
-// };
-
-// export default Index;
-
-
-
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Building } from "@/types/building";
 import BuildingSelector from "@/components/BuildingSelector";
@@ -101,19 +8,56 @@ import ConsumptionChart from "@/components/ConsumptionChart";
 import PredictionForm from "@/components/PredictionForm";
 import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import { LogOut } from "lucide-react";
 
 // API call function to fetch metrics from the backend
-const fetchMetrics = async (building: string, startDate: string, endDate: string) => {
-  const response = await fetch(
-    `http://localhost:5001/metrics?building=${building}&start_date=${startDate}&end_date=${endDate}`
-  );
-  if (!response.ok) {
-    throw new Error("Failed to fetch metrics");
+const fetchMetrics = async (building: Building, startDate: string, endDate: string) => {
+  try {
+    console.log(`Fetching metrics for ${building.name} from ${startDate} to ${endDate}`);
+    const url = `http://localhost:5001/metrics?building=${encodeURIComponent(building.name)}&start_date=${startDate}&end_date=${endDate}`;
+    console.log('Request URL:', url);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      mode: 'cors',
+    });
+    
+    console.log('Response status:', response.status);
+    const data = await response.json();
+    console.log('Response data:', data);
+    
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to fetch metrics');
+    }
+    
+    // Validate the response data
+    if (!data.total_consumption || !data.peak_demand || !data.peak_hour) {
+      throw new Error('Invalid response format from server');
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('Error fetching metrics:', error);
+    throw error;
   }
-  return await response.json();
 };
 
 const Index = () => {
+  const { user, logout, isLoading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      navigate('/login');
+    }
+  }, [user, isLoading, navigate]);
+
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>({
     from: new Date(new Date().setDate(new Date().getDate() - 7)),
@@ -126,35 +70,66 @@ const Index = () => {
     peak_demand: number;
     peak_hour: string;
     average_consumption: number;
-    trend_graph: string;
   } | null>(null);
   const [loadingMetrics, setLoadingMetrics] = useState<boolean>(false);
   const [metricsError, setMetricsError] = useState<string>("");
 
   // Fetch metrics when selectedBuilding or dateRange changes
   useEffect(() => {
-    if (selectedBuilding && dateRange.from && dateRange.to) {
-      const startDate = format(dateRange.from, "yyyy-MM-dd");
-      const endDate = format(dateRange.to, "yyyy-MM-dd");
-      setLoadingMetrics(true);
-      setMetricsError("");
-      fetchMetrics(selectedBuilding.name, startDate, endDate)
-        .then((data) => {
+    const fetchData = async () => {
+      if (selectedBuilding && dateRange.from && dateRange.to) {
+        try {
+          setLoadingMetrics(true);
+          setMetricsError("");
+          
+          const startDate = format(dateRange.from, "yyyy-MM-dd");
+          const endDate = format(dateRange.to, "yyyy-MM-dd");
+          
+          console.log('Starting fetch for:', {
+            building: selectedBuilding.name,
+            startDate,
+            endDate
+          });
+          
+          const data = await fetchMetrics(selectedBuilding, startDate, endDate);
+          
+          console.log('Successfully fetched metrics:', data);
           setMetrics(data);
+          setMetricsError("");
+        } catch (err) {
+          console.error('Error in fetch effect:', err);
+          setMetricsError(err instanceof Error ? err.message : "Failed to fetch metrics");
+          setMetrics(null);
+        } finally {
           setLoadingMetrics(false);
-        })
-        .catch((err) => {
-          console.error("Error fetching metrics:", err);
-          setMetricsError(err.message);
-          setLoadingMetrics(false);
-        });
-    }
+        }
+      } else {
+        console.log('No building or date range selected');
+        setMetrics(null);
+        setMetricsError("");
+      }
+    };
+
+    fetchData();
   }, [selectedBuilding, dateRange]);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
+
+  if (!user) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen p-6 space-y-6">
       <header className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold">
             {selectedBuilding 
               ? `${selectedBuilding.name} Dashboard`
@@ -166,23 +141,33 @@ const Index = () => {
               : "Monitor and analyze energy usage across buildings"}
           </p>
         </div>
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <BuildingSelector
-            value={selectedBuilding}
-            onChange={setSelectedBuilding}
-          />
-          <DateRangePicker
-            value={dateRange}
-            onChange={(range) => {
-              if (range) setDateRange(range);
-            }}
-          />
+        <div className="flex items-center gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <BuildingSelector
+              value={selectedBuilding}
+              onChange={setSelectedBuilding}
+            />
+            <DateRangePicker
+              value={dateRange}
+              onChange={(range) => {
+                if (range) setDateRange(range);
+              }}
+            />
+          </div>
+          <Button
+            variant="ghost"
+            onClick={handleLogout}
+            className="flex items-center gap-2 hover:bg-transparent"
+          >
+            <span className="text-sm font-medium">Logout</span>
+            <LogOut className="h-4 w-4" />
+          </Button>
         </div>
       </header>
 
       {/* Display error message if fetching metrics fails */}
       {metricsError && (
-        <div className="text-red-500">
+        <div className="text-red-500 bg-red-100 p-4 rounded-md">
           Error fetching metrics: {metricsError}
         </div>
       )}
@@ -191,13 +176,13 @@ const Index = () => {
         <Card className="glass-card p-6">
           <h3 className="text-lg font-semibold mb-2">Total Consumption</h3>
           <div className="text-3xl font-bold text-primary">
-            {loadingMetrics
-              ? "Loading..."
-              : metrics
-              ? `${metrics.total_consumption.toFixed(2)} kWh`
-              : selectedBuilding
-              ? "No data"
-              : "2,345.67 kWh"}
+            {loadingMetrics ? (
+              "Loading..."
+            ) : metrics ? (
+              `${(metrics.total_consumption / 1000).toFixed(2)} MWh`
+            ) : (
+              "No data"
+            )}
           </div>
           <p className="text-muted-foreground">
             {dateRange.from && dateRange.to
@@ -208,24 +193,26 @@ const Index = () => {
         <Card className="glass-card p-6">
           <h3 className="text-lg font-semibold mb-2">Peak Demand</h3>
           <div className="text-3xl font-bold text-destructive">
-            {loadingMetrics
-              ? "Loading..."
-              : metrics
-              ? `${metrics.peak_demand.toFixed(1)} kW`
-              : "78.9 kW"}
+            {loadingMetrics ? (
+              "Loading..."
+            ) : metrics ? (
+              `${metrics.peak_demand.toFixed(1)} kW`
+            ) : (
+              "No data"
+            )}
           </div>
-          <p className="text-muted-foreground">Highest in last 24 hours</p>
+          <p className="text-muted-foreground">Highest in selected period</p>
         </Card>
         <Card className="glass-card p-6">
           <h3 className="text-lg font-semibold mb-2">Peak Hours</h3>
           <div className="text-3xl font-bold text-amber-500">
-            {loadingMetrics
-              ? "Loading..."
-              : metrics
-              ? metrics.peak_hour
-              : selectedBuilding
-              ? "2 PM - 4 PM"
-              : "1 PM - 5 PM"}
+            {loadingMetrics ? (
+              "Loading..."
+            ) : metrics ? (
+              metrics.peak_hour
+            ) : (
+              "No data"
+            )}
           </div>
           <p className="text-muted-foreground">
             {selectedBuilding ? "Building peak time" : "Community peak time"}
@@ -236,18 +223,7 @@ const Index = () => {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="glass-card p-6">
           <h3 className="text-lg font-semibold mb-4">Consumption Trends</h3>
-          {loadingMetrics ? (
-            <p>Loading...</p>
-          ) : metrics && metrics.trend_graph ? (
-            <img
-              id="trendGraph"
-              src={`data:image/png;base64,${metrics.trend_graph}`}
-              alt="Consumption Trend Graph"
-              style={{ maxWidth: "600px" }}
-            />
-          ) : (
-            <ConsumptionChart dateRange={dateRange} buildingId={selectedBuilding?.id} />
-          )}
+          <ConsumptionChart dateRange={dateRange} buildingId={selectedBuilding?.id} />
         </Card>
         {!selectedBuilding && (
           <Card className="glass-card p-6">
