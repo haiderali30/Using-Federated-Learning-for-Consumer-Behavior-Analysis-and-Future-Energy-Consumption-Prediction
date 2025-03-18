@@ -119,6 +119,89 @@ def predict():
         app.logger.error(f"Error in /predict endpoint: {e}")
         return jsonify({"error": str(e)}), 400
 
+@app.route("/consumption", methods=["GET"])
+def get_consumption_data():
+    try:
+        building = request.args.get('building')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        view_type = request.args.get('view_type', 'hourly')  # Default to hourly if not specified
+
+        app.logger.info(f"Received consumption data request for building: {building}, date range: {start_date} to {end_date}, view type: {view_type}")
+
+        if not all([building, start_date, end_date]):
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        # Normalize building name (remove spaces and handle special cases)
+        building_name_map = {
+            "House 1": "House1",
+            "House 2": "House2",
+        }
+        normalized_building = building_name_map.get(building, building.replace(" ", ""))
+        
+        # Read the building-specific dataset
+        file_path = f"datasets/{normalized_building}_data.csv"
+        app.logger.info(f"Reading data from: {file_path}")
+        
+        try:
+            df = pd.read_csv(file_path)
+        except Exception as e:
+            app.logger.error(f"Error reading CSV file: {str(e)}")
+            return jsonify({"error": f"Error reading data for building: {building}"}), 500
+
+        # Identify the date/time column
+        time_columns = ['Time', 'timestamp', 'date', 'DateTime']
+        date_column = next((col for col in time_columns if col in df.columns), None)
+        
+        if not date_column:
+            app.logger.error(f"No valid date column found. Available columns: {df.columns.tolist()}")
+            return jsonify({"error": "No valid date/time column found in the dataset"}), 500
+
+        # Identify the energy consumption column
+        energy_columns = ['Use [kW]', 'Energy [kW]', 'Consumption [kW]', 'Power [kW]']
+        energy_column = next((col for col in energy_columns if col in df.columns), None)
+        
+        if not energy_column:
+            app.logger.error(f"No valid energy column found. Available columns: {df.columns.tolist()}")
+            return jsonify({"error": "No valid energy consumption column found in the dataset"}), 500
+
+        # Convert date column and filter by date range
+        df[date_column] = pd.to_datetime(df[date_column])
+        mask = (df[date_column].dt.date >= pd.to_datetime(start_date).date()) & \
+               (df[date_column].dt.date <= pd.to_datetime(end_date).date())
+        df_filtered = df[mask].copy()
+
+        if df_filtered.empty:
+            app.logger.warning(f"No data found for date range: {start_date} to {end_date}")
+            return jsonify({"error": "No data available for the selected date range"}), 404
+
+        # Aggregate data based on view type
+        if view_type == 'daily':
+            # For daily view, group by date and calculate mean consumption
+            df_filtered['date'] = df_filtered[date_column].dt.date
+            df_agg = df_filtered.groupby('date', as_index=False).agg({
+                energy_column: 'mean'
+            })
+            df_agg[date_column] = pd.to_datetime(df_agg['date'])
+        else:  # hourly view
+            # For hourly view, use the original timestamps
+            df_agg = df_filtered
+
+        # Format data for the chart
+        consumption_data = df_agg.apply(
+            lambda row: {
+                "timestamp": row[date_column].isoformat(),
+                "consumption": float(row[energy_column])
+            },
+            axis=1
+        ).tolist()
+
+        return jsonify(consumption_data)
+
+    except Exception as e:
+        app.logger.error(f"Error in /consumption endpoint: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/")
 def home():
     return "Energy Consumption Prediction API is running!"
