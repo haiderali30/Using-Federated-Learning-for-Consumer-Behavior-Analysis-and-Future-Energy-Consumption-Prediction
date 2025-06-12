@@ -1,1 +1,17 @@
-in order to run frontend you have to open energy dashboard vision main folder and in same directory run npm run dev which will open the react frontend and then go to folder backend and after going to that folder open cmd in same directory and run python app.py to run flask backend
+🚀 How to Run the Project
+Start the Frontend (React):
+
+Navigate to the energy-dashboard-vision main directory.
+
+Open a terminal in this directory and run:
+  npm run dev
+This will start the React frontend on your local server.
+
+Start the Backend (Flask):
+
+Inside the same project folder, navigate to the backend directory.
+
+Open a terminal in the backend folder and run:
+
+python app.py
+This will launch the Flask backend server.
